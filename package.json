@@ -1,0 +1,16 @@
+{
+  "name": "subdivide-dome",
+  "version": "1.0.0",
+  "description": "Upsamples SIMCAD meshes",
+  "main": "subdivide.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Emil Axelsson",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^3.0.2",
+    "image-output": "^2.4.1",
+    "xml2js": "^0.4.22"
+  }
+}
