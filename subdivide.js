@@ -11,14 +11,14 @@ function generateGrid(dims) {
   return generateArray(dims).map((y, i) => generateArray(dims))
 }
 
-// fn: function(value, [xIndex, yIndex]) -> grid
+// fn: function(value, [xIndex, yIndex]) -> newValue
 function gridMap(grid, fn) {
   return grid.map((row, rowIndex) => 
     row.map((value, columnIndex) => fn(value, [columnIndex, rowIndex]))
   )
 }
 
-// fn: function(value, [xIndex, yIndex]) -> grid
+// fn: function(value, [xIndex, yIndex]) -> newValue
 function forEachCell(grid, fn) {
     return grid.forEach((row, rowIndex) => 
       row.forEach((value, columnIndex) => fn(value, [columnIndex, rowIndex]))
@@ -36,15 +36,19 @@ function catmullRom(t, p1, p2, p3, p4) {
   return t*t*t*a + t*t*b + t*c + d;
 }
 
+function lerp(t, p1, p2) {
+  return (1 - t) * p1 + t * p2;
+}
+
 // Sample a grid using 2 dimensional Catmull-Rom interpolation
-function sample(grid, x, y) {
+function catmullRomSample(grid, x, y) {
   const xInt = Math.floor(x);
   const yInt = Math.floor(y);
   const xFrac = x - xInt;
   const yFrac = y - yInt;
   const dims = [grid[0].length, grid.length];
 
-  // Create a 4x4 grid where bilinear interpolation can be performed
+  // Create a 4x4 grid where catmull rom interpolation can be performed
   const p = gridMap(generateGrid(4), (v, [x, y]) => {
     const clampedI = Math.max(Math.min(xInt + x - 1, dims[0] - 1), 0);
     const clampedJ = Math.max(Math.min(yInt + y - 1, dims[1] - 1), 0);
@@ -66,11 +70,37 @@ function sample(grid, x, y) {
   return [xOut, yOut];
 }
 
+function linearSample(grid, x, y) {
+  const xInt = Math.floor(x);
+  const yInt = Math.floor(y);
+  const xFrac = x - xInt;
+  const yFrac = y - yInt;
+  const dims = [grid[0].length, grid.length];
+
+  // Create a 2x2 grid where linear interpolation can be performed
+  const p = gridMap(generateGrid(2), (v, [x, y]) => {
+    const clampedI = Math.max(Math.min(xInt + x, dims[0] - 1), 0);
+    const clampedJ = Math.max(Math.min(yInt + y, dims[1] - 1), 0);
+    return grid[clampedJ][clampedI];
+  });
+
+  const x0 = lerp(xFrac, p[0][0][0], p[0][1][0]);
+  const x1 = lerp(xFrac, p[1][0][0], p[1][1][0]);
+  const xOut = lerp(yFrac, x0, x1);
+  
+  const y0 = lerp(xFrac, p[0][0][1], p[0][1][1]);
+  const y1 = lerp(xFrac, p[1][0][1], p[1][1][1]);
+  const yOut = lerp(yFrac, y0, y1);
+  
+  return [xOut, yOut];
+}
+
+
 function outputGridToImage(grid, filename) {
   const imageData = [];
   forEachCell(grid, value => {
-    imageData.push(Math.max(Math.min(value[0] / 200, 1), 0));
-    imageData.push(Math.max(Math.min(value[1] / 200, 1), 0));
+    imageData.push(Math.max(Math.min(value[0] / 500 + 0.5, 1), 0));
+    imageData.push(Math.max(Math.min(value[1] / 500 + 0.5, 1), 0));
     imageData.push(0);
     imageData.push(1);
   });
@@ -126,24 +156,38 @@ xml2js.parseString(input, function(err, result) {
     return points.slice(i * originalDimensions, (i + 1) * originalDimensions);
   });
   
-  const newGridTemplate = generateGrid(Math.floor(originalDimensions * upsampleFactor));
-  const newGrid = gridMap(newGridTemplate, (v, gridIndex) => {
+  const newGridTemplate = generateGrid(Math.floor((originalDimensions - 1) * upsampleFactor) + 1);
+
+  const catmullRomGrid = gridMap(newGridTemplate, (v, gridIndex) => {
     const x = gridIndex[0] / upsampleFactor;
     const y = gridIndex[1] / upsampleFactor;
-    return sample(originalGrid, x, y);
+    return catmullRomSample(originalGrid, x, y);
+  });
+
+  const linearGrid = gridMap(newGridTemplate, (v, gridIndex) => {
+    const x = gridIndex[0] / upsampleFactor;
+    const y = gridIndex[1] / upsampleFactor;
+    return linearSample(originalGrid, x, y);
   });
 
   outputGridToImage(originalGrid, program.input + '.png');
-  outputGridToImage(newGrid, program.output + '.png');
+  outputGridToImage(linearGrid, program.output + '.linear.png');
+  outputGridToImage(catmullRomGrid, program.output + '.png');
 
-  const newXPoints = [], newYPoints = [];
-  forEachCell(newGrid, (value) => {
-    newXPoints.push(value[0]);
-    newYPoints.push(value[1]);
+  const differenceGrid = gridMap(catmullRomGrid, (value, [xIndex, yIndex]) => [
+    (value[0] - linearGrid[yIndex][xIndex][0]) * 500,
+    (value[1] - linearGrid[yIndex][xIndex][1]) * 500
+  ]);
+  outputGridToImage(differenceGrid, program.output + '.difference.png');
+
+  const catmullRomXPoints = [], catmullRomYPoints = [];
+  forEachCell(catmullRomGrid, (value) => {
+    catmullRomXPoints.push(value[0]);
+    catmullRomYPoints.push(value[1]);
   });
  
-  result.GeometryFile.GeometryDefinition[0]['X-FlatParameters'][0]._ = newXPoints.join(' ');
-  result.GeometryFile.GeometryDefinition[0]['Y-FlatParameters'][0]._ = newYPoints.join(' ');
+  result.GeometryFile.GeometryDefinition[0]['X-FlatParameters'][0]._ = catmullRomXPoints.join(' ');
+  result.GeometryFile.GeometryDefinition[0]['Y-FlatParameters'][0]._ = catmullRomYPoints.join(' ');
 
   const builder = new xml2js.Builder();
   const outputXml = builder.buildObject(result);
